@@ -27,6 +27,9 @@ class Circle(Object):
         if closest_distance <= self.radius:
             hit_dist_from_circle = math.sqrt(self.radius * self.radius - closest_distance * closest_distance)
             hit_dist = projected_distance - hit_dist_from_circle
+            if hit_dist < 0.0:
+                return
+
             hit_point = origin + direction * hit_dist
             normal = (hit_point - self.position) / self.radius
             return RayIntersection(hit_dist, normal)
@@ -52,8 +55,8 @@ def raytrace(size: np.ndarray, process_count: int, process_index: int, pixel_buf
     center = size / 2
     
     while True:
-        for y in range(size[1]):
-            for x in range(process_index, size[0], process_count):
+        for y in range(process_index, size[1], process_count):
+            for x in range(size[0]):
                 if quit_event.is_set(): return
 
                 params: Parameters = load_buffer(params_mem.buf)

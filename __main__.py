@@ -78,6 +78,7 @@ def main():
         process.join()
 
     pixel_mem.unlink()
+    params_mem.unlink()
     pygame.quit()
 
 if __name__ == "__main__":

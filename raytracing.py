@@ -5,8 +5,9 @@ import numpy as np
 import math
 
 class Object:
-    def __init__(self, position: np.ndarray):
-        self.position = position
+    def __init__(self, spatial: np.matrix, translation: np.ndarray):
+        self.spatial = spatial
+        self.translation = translation
 
 class RayIntersection:
     def __init__(self, distance: float, normal: np.ndarray):
@@ -14,35 +15,41 @@ class RayIntersection:
         self.normal = normal
 
 class Circle(Object):
-    def __init__(self, position: np.ndarray, radius: float):
-        super().__init__(position)
+    def __init__(self, spatial: np.matrix, translation: np.ndarray, radius: float):
+        super().__init__(spatial, translation)
         self.radius = radius
     def intersect(self, origin: np.ndarray, direction: np.ndarray):
-        direction = direction / np.linalg.norm(direction)
-        offset_position = self.position - origin
-        projected_distance = np.dot(offset_position, direction)
+        world_origin = origin
+        inv_spatial = np.linalg.inv(self.spatial)
+        origin = np.matmul(inv_spatial, origin - self.translation)
+        direction = np.matmul(inv_spatial, direction)
+        direction /= np.linalg.norm(direction)
+        projected_distance = -np.dot(origin, direction)
         projected_point = origin + direction * projected_distance
-        closest_distance = np.linalg.norm(projected_point - self.position)
+        closest_distance = np.linalg.norm(projected_point)
 
-        if closest_distance <= self.radius:
-            hit_dist_from_circle = math.sqrt(self.radius * self.radius - closest_distance * closest_distance)
-            hit_dist = projected_distance - hit_dist_from_circle
-            if hit_dist < 0.0:
-                return
+        if closest_distance > self.radius:
+            return
 
-            hit_point = origin + direction * hit_dist
-            normal = (hit_point - self.position) / self.radius
-            return RayIntersection(hit_dist, normal)
+        hit_dist_from_circle = math.sqrt(self.radius * self.radius - closest_distance * closest_distance)
+        hit_dist = projected_distance - hit_dist_from_circle
+
+        if hit_dist < 0.0:
+            return
+
+        hit_point = origin + direction * hit_dist
+        hit_normal = hit_point
+        world_point = np.matmul(self.spatial, hit_point) + self.translation
+        world_normal = np.matmul(np.linalg.inv(np.transpose(self.spatial)), hit_normal)
+        world_normal /= np.linalg.norm(world_normal)
+        dist = np.linalg.norm(world_origin - world_point)
+        return RayIntersection(dist, world_normal)
 
 class Parameters:
     def __init__(self, position: np.ndarray, fov = 1.0):
         self.position = position
         self.fov = fov
         self.objects: list[Object] = []
-
-class Move:
-    def __init__(self, direction: np.ndarray):
-        self.direction = direction
 
 def load_buffer(buffer):
     size = struct.unpack("i", buffer[0:4])[0]
@@ -69,4 +76,4 @@ def raytrace(size: np.ndarray, process_count: int, process_index: int, pixel_buf
                 if result != None:
                     pixel_mem.buf[start:start+3] = np.astype(result.normal * 127 + 127, np.uint8).tobytes()
                 else:
-                    pixel_mem.buf[start:start+3] = bytes((0, 0, 0))
+                    pixel_mem.buf[start:start+3] = bytes((120, 120, 120))

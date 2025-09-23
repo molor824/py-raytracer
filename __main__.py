@@ -33,13 +33,13 @@ def main():
 
     params_mem = shm.SharedMemory(create=True, size=OBJ_MEM_CAPACITY)
     params = raytracing.Parameters(np.array((0.0, 0.0, 0.0)))
-    params.objects.append(raytracing.Circle(np.array((0.0, 0.0, 200.0)), 50.0))
-    params.objects.append(raytracing.Circle(np.array((0.0, 30.0, 500.0)), 100.0))
+    params.objects.append(raytracing.Circle(np.identity(3), np.array((0.0, 0.0, 200.0)), 50.0))
+    params.objects.append(raytracing.Circle(np.identity(3), np.array((0.0, 30.0, 500.0)), 100.0))
     write_buffer(params_mem.buf, params)
 
     quit_event = mp.Event()
 
-    cpu_count = mp.cpu_count() - 1
+    cpu_count = mp.cpu_count()
     processes = [mp.Process(
         target=raytracing.raytrace,
         args=(np.array((BUF_WIDTH, BUF_HEIGHT)), cpu_count, i, pixel_mem.name, params_mem.name, quit_event)

@@ -29,9 +29,10 @@ def main():
     pixel_mem = shm.SharedMemory(create=True, size=BUF_WIDTH * BUF_HEIGHT * 3)
     params_mem = shm.SharedMemory(create=True, size=10000)
 
-    parameters = Parameters(np.array([BUF_WIDTH, BUF_HEIGHT]), Transform(), [
+    parameters = Parameters((BUF_WIDTH, BUF_HEIGHT), Transform(), [
         Circle(Transform(translation=np.array((0.0, 0.0, 200.0))), 50.0),
         Circle(Transform(translation=np.array((0.0, 30.0, 500.0))), 100.0),
+        Cube(Transform(translation=np.array((20.0, 0.0, 300.0))), (100.0, 60.0, 120.0))
     ])
     write_mem(params_mem, parameters)
 
@@ -58,7 +59,7 @@ def main():
         updated = False
         
         if direction[0] != 0.0 or direction[1] != 0.0:
-            parameters.transform.translation += np.array(direction) * (DELTA * 40.0)
+            parameters.transform.translation += np.array(direction) * (DELTA * 100.0)
             updated = True
         
         if updated:

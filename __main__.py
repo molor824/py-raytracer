@@ -1,10 +1,10 @@
 import pygame
-import raytracing
 import multiprocessing as mp
 import multiprocessing.shared_memory as shm
-import pickle
-import struct
 import numpy as np
+import pickle
+
+from raytracing import *
 
 WIDTH = 800
 HEIGHT = 600
@@ -12,15 +12,12 @@ HEIGHT = 600
 BUF_WIDTH = WIDTH // 2
 BUF_HEIGHT = HEIGHT // 2
 
-FPS = 60
+FPS = 30
 DELTA = 1.0 / FPS
 
-OBJ_MEM_CAPACITY = 1024 * 1024
-
-def write_buffer(buffer, value):
-    pickled = pickle.dumps(value)
-    buffer[0:4] = struct.pack("i", len(pickled))
-    buffer[4:len(pickled) + 4] = pickled
+def write_mem(mem: shm.SharedMemory, params):
+    pickled = pickle.dumps(params)
+    mem.buf[0:len(pickled)] = pickled
 
 def main():
     pygame.init()
@@ -30,23 +27,18 @@ def main():
     render_surface = pygame.Surface((BUF_WIDTH, BUF_HEIGHT))
 
     pixel_mem = shm.SharedMemory(create=True, size=BUF_WIDTH * BUF_HEIGHT * 3)
+    params_mem = shm.SharedMemory(create=True, size=10000)
 
-    params_mem = shm.SharedMemory(create=True, size=OBJ_MEM_CAPACITY)
-    params = raytracing.Parameters(np.array((0.0, 0.0, 0.0)))
-    params.objects.append(raytracing.Circle(np.identity(3), np.array((0.0, 0.0, 200.0)), 50.0))
-    params.objects.append(raytracing.Circle(np.identity(3), np.array((0.0, 30.0, 500.0)), 100.0))
-    write_buffer(params_mem.buf, params)
-
-    quit_event = mp.Event()
+    parameters = Parameters(np.array([BUF_WIDTH, BUF_HEIGHT]), Transform(), [
+        Circle(Transform(translation=np.array((0.0, 0.0, 200.0))), 50.0),
+        Circle(Transform(translation=np.array((0.0, 30.0, 500.0))), 100.0),
+    ])
+    write_mem(params_mem, parameters)
 
     cpu_count = mp.cpu_count()
-    processes = [mp.Process(
-        target=raytracing.raytrace,
-        args=(np.array((BUF_WIDTH, BUF_HEIGHT)), cpu_count, i, pixel_mem.name, params_mem.name, quit_event)
-    ) for i in range(cpu_count)]
-
-    for process in processes:
-        process.start()
+    update_events = [mp.Event() for _ in range(cpu_count)]
+    processes = [mp.Process(target=raytrace, args=(cpu_count, i, pixel_mem.name, params_mem.name, update_events[i])) for i in range(cpu_count)]
+    for p in processes: p.start()
 
     running = True
     while running:
@@ -63,8 +55,16 @@ def main():
         if keys[pygame.K_DOWN]:
             direction[1] += 1.0
         
-        params.position = params.position + np.array(direction) * (DELTA * 40.0)
-        write_buffer(params_mem.buf, params)
+        updated = False
+        
+        if direction[0] != 0.0 or direction[1] != 0.0:
+            parameters.transform.translation += np.array(direction) * (DELTA * 40.0)
+            updated = True
+        
+        if updated:
+            write_mem(params_mem, parameters)
+            for event in update_events:
+                event.set()
 
         array = np.resize(np.frombuffer(pixel_mem.buf, dtype=np.uint8), (BUF_WIDTH, BUF_HEIGHT, 3))
 
@@ -76,13 +76,15 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
-    quit_event.set()
-
-    for process in processes:
-        process.join()
-
+    if processes != None:
+        for p in processes:
+            p.kill()
+            p.join()
+            p.close()
     pixel_mem.unlink()
     params_mem.unlink()
+    pixel_mem.close()
+    params_mem.close()
     pygame.quit()
 
 if __name__ == "__main__":

@@ -1,13 +1,29 @@
-import multiprocessing.shared_memory as shm
-import struct
-import pickle
+from multiprocessing.shared_memory import SharedMemory
+from multiprocessing import Event
 import numpy as np
 import math
+import pickle
 
-class Object:
-    def __init__(self, spatial: np.matrix, translation: np.ndarray):
+class Transform:
+    def __init__(self, spatial = np.identity(3), translation = np.array([0.0, 0.0, 0.0])):
         self.spatial = spatial
         self.translation = translation
+    
+    def inv(self):
+        inv_spatial = np.linalg.inv(self.spatial)
+        return Transform(inv_spatial, np.matmul(inv_spatial, -self.translation))
+    
+    def mul_point(self, point: np.ndarray):
+        return np.matmul(self.spatial, point) + self.translation
+    def mul_vector(self, vector: np.ndarray):
+        return np.matmul(self.spatial, vector)
+    def mul_normal(self, normal: np.ndarray):
+        normal = np.matmul(np.linalg.inv(np.transpose(self.spatial)), normal)
+        return normal / np.linalg.norm(normal)
+
+class Object:
+    def __init__(self, transform: Transform):
+        self.transform = transform
 
 class RayIntersection:
     def __init__(self, distance: float, normal: np.ndarray):
@@ -15,14 +31,14 @@ class RayIntersection:
         self.normal = normal
 
 class Circle(Object):
-    def __init__(self, spatial: np.matrix, translation: np.ndarray, radius: float):
-        super().__init__(spatial, translation)
+    def __init__(self, transform: Transform, radius: float):
+        super().__init__(transform)
         self.radius = radius
     def intersect(self, origin: np.ndarray, direction: np.ndarray):
         world_origin = origin
-        inv_spatial = np.linalg.inv(self.spatial)
-        origin = np.matmul(inv_spatial, origin - self.translation)
-        direction = np.matmul(inv_spatial, direction)
+        inv_transform = self.transform.inv()
+        origin = inv_transform.mul_point(origin)
+        direction = inv_transform.mul_vector(direction)
         direction /= np.linalg.norm(direction)
         projected_distance = -np.dot(origin, direction)
         projected_point = origin + direction * projected_distance
@@ -39,41 +55,48 @@ class Circle(Object):
 
         hit_point = origin + direction * hit_dist
         hit_normal = hit_point
-        world_point = np.matmul(self.spatial, hit_point) + self.translation
-        world_normal = np.matmul(np.linalg.inv(np.transpose(self.spatial)), hit_normal)
-        world_normal /= np.linalg.norm(world_normal)
-        dist = np.linalg.norm(world_origin - world_point)
-        return RayIntersection(dist, world_normal)
+        world_point = self.transform.mul_point(hit_point)
+        return RayIntersection(np.linalg.norm(world_origin - world_point), self.transform.mul_normal(hit_normal))
 
 class Parameters:
-    def __init__(self, position: np.ndarray, fov = 1.0):
-        self.position = position
-        self.fov = fov
-        self.objects: list[Object] = []
+    def __init__(self, size: np.ndarray, transform: Transform, objects: list):
+        self.size = size
+        self.transform = transform
+        self.objects = objects
 
-def load_buffer(buffer):
-    size = struct.unpack("i", buffer[0:4])[0]
-    return pickle.loads(buffer[4:size + 4])
+def raytrace(process_count: int, process_index: int, pixel_buffer_name: str, params_buffer_name: str, update_event = Event()):
+    pixel_mem = SharedMemory(pixel_buffer_name)
+    params_mem = SharedMemory(params_buffer_name)
+    print(f"Process index {process_index}")
 
-def raytrace(size: np.ndarray, process_count: int, process_index: int, pixel_buffer_name: str, params_buffer_name: str, quit_event):
-    pixel_mem = shm.SharedMemory(pixel_buffer_name)
-    params_mem = shm.SharedMemory(params_buffer_name)
-
-    center = size / 2
-    
     while True:
-        for y in range(process_index, size[1], process_count):
-            for x in range(size[0]):
-                if quit_event.is_set(): return
+        params: Parameters = pickle.loads(params_mem.buf)
+        size = params.size
+        transform = params.transform
+        objects = params.objects
+        center = size / 2
 
-                params: Parameters = load_buffer(params_mem.buf)
-                origin = params.position
-                direction = np.array((x + 0.5 - center[0], (y + 0.5 - center[1]) * params.fov, size[1]), dtype=np.float64)
-                start = (x * size[1] + y) * 3
+        xs = np.arange(size[0])
+        ys = np.arange(process_index, size[1], process_count)
+        pixel_indices = (xs[:, np.newaxis] * size[1] + ys).ravel()
+        np.random.shuffle(pixel_indices)
 
-                result = min((obj.intersect(origin, direction) for obj in params.objects), key=lambda hit: hit.distance if hit != None else math.inf)
-                
-                if result != None:
-                    pixel_mem.buf[start:start+3] = np.astype(result.normal * 127 + 127, np.uint8).tobytes()
-                else:
-                    pixel_mem.buf[start:start+3] = bytes((120, 120, 120))
+        for i in pixel_indices:
+            if update_event.is_set():
+                break
+
+            x = i // size[1]
+            y = i % size[1]
+            origin = transform.translation
+            direction = transform.mul_vector(np.array((x + 0.5 - center[0], (y + 0.5 - center[1]), size[1])))
+            start = i * 3
+
+            result = min((obj.intersect(origin, direction) for obj in objects), key=lambda hit: hit.distance if hit != None else math.inf)
+
+            if result != None:
+                pixel_mem.buf[start:start+3] = np.astype(result.normal * 127 + 127, np.uint8).tobytes()
+            else:
+                pixel_mem.buf[start:start+3] = bytes((120, 120, 120))
+
+        update_event.wait()
+        update_event.clear()

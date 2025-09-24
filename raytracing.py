@@ -58,6 +58,7 @@ class Circle(Object):
 NORMALS0 = -np.identity(3)
 NORMALS1 = np.identity(3)
 NORMALS = np.append(NORMALS0, NORMALS1, 0)
+MARGIN = 0.001 # allow for floating point inaccuracy
 class Cube(Object):
     def __init__(self, transform: Transform, size: tuple[float, float, float]):
         super().__init__(transform)
@@ -81,7 +82,7 @@ class Cube(Object):
         # intersect[axis] = origin + direction * dist[axis]
         intersections = origin + direction * dists[:,np.newaxis]
         # now we need to mask out the intersections that go beyond the cube's boundary
-        conditions = np.all((intersections >= -half_size + NORMALS) & (intersections <= half_size + NORMALS), 1)
+        conditions = np.all((intersections >= -half_size + MARGIN) & (intersections <= half_size + MARGIN), 1)
         # set invalid distances with inf so the min function pretty much ignores over it
         valid_dists = np.where(conditions, dists, np.inf)
         # find min dist and normal

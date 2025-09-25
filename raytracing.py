@@ -11,14 +11,14 @@ class Transform:
     
     def inv(self):
         inv_spatial = np.linalg.inv(self.spatial)
-        return Transform(inv_spatial, np.matmul(inv_spatial, -self.translation))
+        return Transform(inv_spatial, np.dot(inv_spatial, -self.translation))
     
     def mul_point(self, point: np.ndarray):
-        return np.matmul(self.spatial, point) + self.translation
+        return np.dot(self.spatial, point) + self.translation
     def mul_vector(self, vector: np.ndarray):
-        return np.matmul(self.spatial, vector)
+        return np.dot(self.spatial, vector)
     def mul_normal(self, normal: np.ndarray):
-        normal = np.matmul(np.linalg.inv(np.transpose(self.spatial)), normal)
+        normal = np.dot(np.linalg.inv(np.transpose(self.spatial)), normal)
         return normal / np.linalg.norm(normal)
 
 class Object:
@@ -118,16 +118,16 @@ def raytrace(process_count: int, process_index: int, pixel_buffer_name: str, par
         pixel_indices = (xs[:, np.newaxis] * h + ys).ravel()
         np.random.shuffle(pixel_indices)
 
-        for i in pixel_indices:
+        xs = pixel_indices // h
+        ys = pixel_indices % h
+        origin = transform.translation
+        directions = np.transpose(transform.mul_vector(np.array([xs + 0.5 - cx, ys + 0.5 - cy, np.repeat(h, xs.shape[0])])))
+
+        for i, direction in zip(pixel_indices, directions):
             if update_event.is_set():
                 break
 
-            x = i // h
-            y = i % h
-            origin = transform.translation
-            direction = transform.mul_vector(np.array((x + 0.5 - cx, (y + 0.5 - cy), h)))
             start = i * 3
-
             result = min((obj.intersect(origin, direction) for obj in objects), key=lambda hit: hit.distance if hit != None else math.inf)
 
             if result != None:

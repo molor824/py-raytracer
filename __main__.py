@@ -3,6 +3,7 @@ import multiprocessing as mp
 import multiprocessing.shared_memory as shm
 import numpy as np
 import pickle
+import math
 
 from raytracing import *
 
@@ -19,6 +20,31 @@ def write_mem(mem: shm.SharedMemory, params):
     pickled = pickle.dumps(params)
     mem.buf[0:len(pickled)] = pickled
 
+def rot_x(radian):
+    c = math.cos(radian)
+    s = math.sin(radian)
+    return np.array([[1.0, 0.0, 0.0],
+                     [0.0, c, -s],
+                     [0, s, c]])
+
+def rot_y(radian: float):
+    c = math.cos(radian)
+    s = math.sin(radian)
+    return np.array([[c, 0.0, s],
+                     [0.0, 1.0, 0.0],
+                     [-s, 0.0, c]])
+
+def rot_z(radian: float):
+    c = math.cos(radian)
+    s = math.sin(radian)
+    return np.array([[c, -s, 0.0],
+                     [s, c, 0.0],
+                     [0.0, 0.0, 1.0]])
+
+def scale(scale):
+    scale = np.array(scale)
+    return np.identity(scale.shape[0]) * scale[:, np.newaxis]
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -30,9 +56,9 @@ def main():
     params_mem = shm.SharedMemory(create=True, size=10000)
 
     parameters = Parameters((BUF_WIDTH, BUF_HEIGHT), Transform(), [
-        Circle(Transform(translation=np.array((0.0, 0.0, 200.0))), 50.0),
-        Circle(Transform(translation=np.array((0.0, 30.0, 500.0))), 100.0),
-        Cube(Transform(translation=np.array((20.0, 0.0, 300.0))), (100.0, 60.0, 120.0))
+        Circle(Transform(spatial=np.dot(rot_z(np.deg2rad(30.0)), scale((1.0, 2.1, 1.0))), translation=np.array((0.0, 0.0, 250.0))), 50.0),
+        Cube(Transform(spatial=np.dot(rot_x(np.rad2deg(40.0)), np.dot(rot_y(np.rad2deg(20.0)), rot_z(np.rad2deg(130.0)))), translation=np.array((0.0, -100.0, 300.0))), (60.0, 30.0, 100.0)),
+        Cube(Transform(spatial=np.dot(scale((2.0, 0.8, 1.2)), rot_y(np.rad2deg(45.0))), translation=np.array((0.0, 0.0, 300.0))), (100.0, 60.0, 120.0))
     ])
     write_mem(params_mem, parameters)
 
@@ -88,5 +114,5 @@ def main():
     params_mem.close()
     pygame.quit()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

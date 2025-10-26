@@ -21,18 +21,25 @@ class Transform:
         normal = np.dot(np.linalg.inv(np.transpose(self.spatial)), normal)
         return normal / np.linalg.norm(normal)
 
+class Material:
+    def __init__(self, color = (255, 255, 255), reflection = 0.0):
+        self.color = color
+        self.reflection = reflection
+
 class Object:
-    def __init__(self, transform: Transform):
+    def __init__(self, transform: Transform, material: Material):
         self.transform = transform
+        self.material = material
 
 class RayIntersection:
-    def __init__(self, distance: float, normal: np.ndarray):
+    def __init__(self, distance: float, normal: np.ndarray, object: Object):
         self.distance = distance
         self.normal = normal
+        self.object = object
 
-class Circle(Object):
-    def __init__(self, transform: Transform, radius: float):
-        super().__init__(transform)
+class Sphere(Object):
+    def __init__(self, radius: float, transform: Transform, material: Material):
+        super().__init__(transform, material)
         self.radius = radius
     def intersect(self, origin: np.ndarray, direction: np.ndarray):
         inv_transform = self.transform.inv()
@@ -44,24 +51,24 @@ class Circle(Object):
         closest_distance = np.linalg.norm(projected_point)
 
         if closest_distance > self.radius:
-            return
+            return None
 
         hit_dist_from_circle = math.sqrt(self.radius * self.radius - closest_distance * closest_distance)
         hit_dist = projected_distance - hit_dist_from_circle
 
         if hit_dist < 0.0:
-            return
+            return None
 
         hit_normal = origin + direction * hit_dist
-        return RayIntersection(np.linalg.norm(self.transform.mul_vector(direction)) * hit_dist, self.transform.mul_normal(hit_normal))
+        return RayIntersection(np.linalg.norm(self.transform.mul_vector(direction * hit_dist)), self.transform.mul_normal(hit_normal), self)
 
 NORMALS0 = -np.identity(3)
 NORMALS1 = np.identity(3)
 NORMALS = np.append(NORMALS0, NORMALS1, 0)
 MARGIN = 0.001 # allow for floating point inaccuracy
 class Cube(Object):
-    def __init__(self, transform: Transform, size: tuple[float, float, float]):
-        super().__init__(transform)
+    def __init__(self, size: tuple[float, float, float], transform: Transform, material: Material):
+        super().__init__(transform, material)
         self.size = size
     def intersect(self, origin: np.ndarray, direction: np.ndarray):
         inv_transform = self.transform.inv()
@@ -87,19 +94,27 @@ class Cube(Object):
         valid_dists = np.where(conditions, dists, np.inf)
         # find min dist and normal
         min_dist_index = np.argmin(valid_dists)
-        if valid_dists[min_dist_index] == np.inf:
+        if valid_dists[min_dist_index] == np.inf or valid_dists[min_dist_index] < 0.0:
             # no valid distances found
-            return
+            return None
         # finalized results
         dist = valid_dists[min_dist_index]
         normal = NORMALS[min_dist_index]
-        return RayIntersection(np.linalg.norm(self.transform.mul_vector(direction)) * dist, self.transform.mul_normal(normal))
+        return RayIntersection(np.linalg.norm(self.transform.mul_vector(direction * dist)), self.transform.mul_normal(normal), self)
+
+class Light:
+    def __init__(self, direction: np.ndarray, color = (255, 255, 255), intensity = 1.0):
+        self.direction = direction
+        self.color = color
+        self.intensity = intensity
 
 class Parameters:
-    def __init__(self, size: tuple[int, int], transform: Transform, objects: list):
+    def __init__(self, size: tuple[int, int], transform: Transform, objects: list, lights=None, base_light=(40, 40, 40)):
         self.size = size
         self.transform = transform
         self.objects = objects
+        self.lights = lights if lights is not None else []
+        self.base_light = base_light
 
 def raytrace(process_count: int, process_index: int, pixel_buffer_name: str, params_buffer_name: str, update_event = Event()):
     pixel_mem = SharedMemory(pixel_buffer_name)
@@ -111,6 +126,8 @@ def raytrace(process_count: int, process_index: int, pixel_buffer_name: str, par
         w, h = params.size
         transform = params.transform
         objects = params.objects
+        lights = params.lights
+        base_light = np.array(params.base_light) / 255.0
         cx, cy = w / 2, h / 2
 
         xs = np.arange(w)
@@ -128,10 +145,25 @@ def raytrace(process_count: int, process_index: int, pixel_buffer_name: str, par
                 break
 
             start = i * 3
-            result = min((obj.intersect(origin, direction) for obj in objects), key=lambda hit: hit.distance if hit != None else math.inf)
+            result: RayIntersection = min((obj.intersect(origin, direction) for obj in objects), key=lambda hit: hit.distance if hit is not None else math.inf)
 
-            if result != None:
-                pixel_mem.buf[start:start+3] = np.astype(result.normal * 127 + 127, np.uint8).tobytes()
+            if result is not None:
+                mat_color = np.array(result.object.material.color) / 255.0
+                min_light = mat_color * base_light
+                out_color = np.zeros_like(mat_color)
+
+                next_origin = origin + direction / np.linalg.norm(direction) * result.distance
+
+                for l in lights:
+                    light_norm = -l.direction / np.linalg.norm(l.direction)
+                    hit = any((obj.intersect(next_origin, light_norm) for obj in objects if obj is not result.object))
+                    if hit:
+                        continue
+
+                    diffuse_color = np.dot(light_norm, result.normal) * mat_color * l.intensity
+                    out_color = out_color + diffuse_color
+
+                pixel_mem.buf[start:start+3] = np.astype(np.clip(out_color, min_light, 1) * 255, np.uint8).tobytes()
             else:
                 pixel_mem.buf[start:start+3] = bytes((120, 120, 120))
 

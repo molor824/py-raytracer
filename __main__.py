@@ -1,9 +1,6 @@
 import pygame
 import multiprocessing as mp
 import multiprocessing.shared_memory as shm
-import numpy as np
-import pickle
-import math
 
 from raytracing import *
 
@@ -41,7 +38,7 @@ def rot_z(radian: float):
                      [s, c, 0.0],
                      [0.0, 0.0, 1.0]])
 
-def scale(scale):
+def scale(scale: tuple):
     scale = np.array(scale)
     return np.identity(scale.shape[0]) * scale[:, np.newaxis]
 
@@ -56,9 +53,19 @@ def main():
     params_mem = shm.SharedMemory(create=True, size=10000)
 
     parameters = Parameters((BUF_WIDTH, BUF_HEIGHT), Transform(), [
-        Circle(Transform(spatial=np.dot(rot_z(np.deg2rad(30.0)), scale((1.0, 2.1, 1.0))), translation=np.array((0.0, 0.0, 250.0))), 50.0),
-        Cube(Transform(spatial=np.dot(rot_x(np.rad2deg(40.0)), np.dot(rot_y(np.rad2deg(20.0)), rot_z(np.rad2deg(130.0)))), translation=np.array((0.0, -100.0, 300.0))), (60.0, 30.0, 100.0)),
-        Cube(Transform(spatial=np.dot(scale((2.0, 0.8, 1.2)), rot_y(np.rad2deg(45.0))), translation=np.array((0.0, 0.0, 300.0))), (100.0, 60.0, 120.0))
+        Sphere(20, Transform(translation=np.array((0.0, -40.0, 250.0))), Material((0, 255, 255))),
+        Cube(
+            (30.0,) * 3,
+            Transform(spatial=rot_y(np.rad2deg(-30.0)), translation=np.array((0.0, -60.0, 250.0))),
+            Material((0, 255, 0))
+        ),
+        Cube(
+            (200.0, 30.0, 150.0),
+            Transform(spatial=rot_y(np.rad2deg(45.0)), translation=np.array((0.0, 0.0, 300.0))),
+            Material((255, 0, 255))
+        )
+    ], [
+        Light(np.array([0.7, 1.0, 0.3]))
     ])
     write_mem(params_mem, parameters)
 
@@ -81,13 +88,13 @@ def main():
             direction[1] -= 1.0
         if keys[pygame.K_DOWN]:
             direction[1] += 1.0
-        
+
         updated = False
-        
+
         if direction[0] != 0.0 or direction[1] != 0.0:
             parameters.transform.translation += np.array(direction) * (DELTA * 100.0)
             updated = True
-        
+
         if updated:
             write_mem(params_mem, parameters)
             for event in update_events:

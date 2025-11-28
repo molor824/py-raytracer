@@ -13,6 +13,9 @@ BUF_HEIGHT = HEIGHT // 2
 FPS = 30
 DELTA = 1.0 / FPS
 
+LOOK_SPEED = 0.5
+MOVE_SPEED = 100.0
+
 def write_mem(mem: shm.SharedMemory, params):
     pickled = pickle.dumps(params)
     mem.buf[0:len(pickled)] = pickled
@@ -52,20 +55,20 @@ def main():
     pixel_mem = shm.SharedMemory(create=True, size=BUF_WIDTH * BUF_HEIGHT * 3)
     params_mem = shm.SharedMemory(create=True, size=10000)
 
-    parameters = Parameters((BUF_WIDTH, BUF_HEIGHT), Transform(), [
-        Sphere(20, Transform(translation=np.array((0.0, -40.0, 250.0))), Material((0, 255, 255))),
+    parameters = Parameters((BUF_WIDTH, BUF_HEIGHT), Transform(translation=np.array((0.0, 0.0, -300.0))), [
+        Sphere(20, Transform(translation=np.array((0.0, -40.0, 0.0))), Material((0, 255, 255))),
         Cube(
             (30.0,) * 3,
-            Transform(spatial=rot_y(np.rad2deg(-30.0)), translation=np.array((0.0, -60.0, 250.0))),
+            Transform(spatial=rot_y(np.deg2rad(-30.0)), translation=np.array((0.0, 0.0, 0.0))),
             Material((0, 255, 0))
         ),
         Cube(
-            (200.0, 30.0, 150.0),
-            Transform(spatial=rot_y(np.rad2deg(45.0)), translation=np.array((0.0, 0.0, 300.0))),
+            (200.0, 20.0, 200.0),
+            Transform(spatial=rot_y(np.deg2rad(45.0)), translation=np.array((0.0, 40.0, 0.0))),
             Material((255, 0, 255))
         )
     ], [
-        Light(np.array([0.7, 1.0, 0.3]))
+        Light(np.array([0.7, 1.0, 0.3])),
     ])
     write_mem(params_mem, parameters)
 
@@ -74,25 +77,46 @@ def main():
     processes = [mp.Process(target=raytrace, args=(cpu_count, i, pixel_mem.name, params_mem.name, update_events[i])) for i in range(cpu_count)]
     for p in processes: p.start()
 
+    camera_y = 0.0
+    camera_x = 0.0
+
     running = True
     while running:
         clock.tick(FPS)
 
         keys = pygame.key.get_pressed()
-        direction = [0.0, 0.0, 0.0]
+        look_direction = [0, 0]
         if keys[pygame.K_RIGHT]:
-            direction[0] += 1.0
+            look_direction[0] += 1
         if keys[pygame.K_LEFT]:
-            direction[0] -= 1.0
+            look_direction[0] -= 1
         if keys[pygame.K_UP]:
-            direction[1] -= 1.0
+            look_direction[1] -= 1
         if keys[pygame.K_DOWN]:
-            direction[1] += 1.0
+            look_direction[1] += 1
+
+        move_direction = [0, 0]
+        if keys[pygame.K_w]:
+            move_direction[1] += 1
+        if keys[pygame.K_s]:
+            move_direction[1] -= 1
+        if keys[pygame.K_d]:
+            move_direction[0] += 1
+        if keys[pygame.K_a]:
+            move_direction[0] -= 1
 
         updated = False
 
-        if direction[0] != 0.0 or direction[1] != 0.0:
-            parameters.transform.translation += np.array(direction) * (DELTA * 100.0)
+        if look_direction[0] != 0 or look_direction[1] != 0:
+            camera_x += -look_direction[1] * (LOOK_SPEED * DELTA)
+            camera_y += look_direction[0] * (LOOK_SPEED * DELTA)
+            camera_x = np.clip(camera_x, -np.pi / 2, np.pi / 2)
+            parameters.transform.spatial = np.dot(rot_y(camera_y), rot_x(camera_x))
+            updated = True
+
+        if move_direction[0] != 0 or move_direction[1] != 0:
+            direction = np.dot(parameters.transform.spatial, np.array([move_direction[0], 0, move_direction[1]], dtype=np.float32))
+            parameters.transform.translation += direction * (MOVE_SPEED * DELTA)
             updated = True
 
         if updated:
@@ -110,7 +134,7 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
-    if processes != None:
+    if processes is not None:
         for p in processes:
             p.kill()
             p.join()
